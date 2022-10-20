@@ -13,11 +13,14 @@ typedef struct thread_parameters {
     int num_iterations;
     int start_index;
     double result;
+    double time_waiting;
 } param_t;
 
+struct timespec start_writing_pipe;
 
 void *CalcPartOfPi(void *arg) {
     param_t *parameters = (param_t *)arg;
+    struct timespec end_waiting;
     //fprintf(stderr, "Thread with start_index = %d\n", parameters->start_index);
     long long int stop = parameters->start_index + parameters->num_iterations;
     double pi = 0;
@@ -26,7 +29,9 @@ void *CalcPartOfPi(void *arg) {
     if (was_read < 0) {
         perror("Error read for synchronization");
     }
-    //fprintf(stderr, "Thread with start_index = %d START CALCULATION\n", parameters->start_index);
+    clock_gettime(CLOCK_MONOTONIC_RAW, &end_waiting);
+    parameters->time_waiting = end_waiting.tv_sec-start_writing_pipe.tv_sec +
+            0.000000001*(end_waiting.tv_nsec-start_writing_pipe.tv_nsec);
     for (int i = parameters->start_index; i < stop; i++) {
         pi += 1.0/(i*4.0 + 1.0);
         pi -= 1.0/(i*4.0 + 3.0);
@@ -63,6 +68,7 @@ int main(int argc, char** argv) {
         threads_parameters[i].start_index = threads_parameters[i - 1].start_index + threads_parameters[i - 1].num_iterations;
         threads_parameters[i].num_iterations = part + (i < NUM_STEPS % NUM_THREADS);
         threads_parameters[i].result = 0;
+        threads_parameters[i].time_waiting = 0;
     }
 
     int pipe_fds[2];
@@ -92,6 +98,7 @@ int main(int argc, char** argv) {
     fprintf(stderr, "THREADS CREATED\n");
     char start_buf[BUFSIZ];
     ssize_t bytes_written = 0;
+    clock_gettime(CLOCK_MONOTONIC_RAW, &start_writing_pipe);
     while (bytes_written < really_created) {
         ssize_t written = 0;
         if (really_created - bytes_written <= BUFSIZ) {
@@ -125,6 +132,13 @@ int main(int argc, char** argv) {
     printf("Time taken to create one thread: %lf sec.\n",
            (end.tv_sec-start.tv_sec + 0.000000001*(end.tv_nsec-start.tv_nsec)) / (really_created));
     printf("canonic pi = \t3.14159265358979\n");
+    double max_time_wait = -1;
+    for (int i = 0; i < NUM_THREADS; i++) {
+        if (max_time_wait < threads_parameters[i].time_waiting) {
+            max_time_wait = threads_parameters[i].time_waiting;
+        }
+    }
+    printf("Max time waiting: \t%lf sec\n", max_time_wait);
     double pi = 0;
     for (int i = 0; i < NUM_THREADS; i++) {
         pi += threads_parameters[i].result;
