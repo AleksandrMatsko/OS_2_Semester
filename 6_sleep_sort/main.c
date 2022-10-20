@@ -26,7 +26,7 @@ void *mythread(void *arg) {
     if (was_read < 0) {
         perror("Error read for synchronization");
     }
-    usleep(node->s_len * 15000);
+    usleep(node->s_len * 30000);
     fputs(node->string, stdout);
     pthread_exit(NULL);
 }
