@@ -170,6 +170,8 @@ int main() {
         }
     }
 
+    close(start_fd);
+    close(write_fd);
     destroyList(list);
     free(string);
     return 0;
