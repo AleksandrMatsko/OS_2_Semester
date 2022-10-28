@@ -12,12 +12,13 @@
 #define BUF_SIZE BUFSIZ
 
 int start_fd;
+int write_fd;
 
 /*
  *
  * how list_t looks
  *
- * nodes                                         end
+ *  head                                         tail
  *   |                                            |
  *   V                                            V
  * +------+------+    +------+------+           +------+------+
@@ -34,8 +35,8 @@ typedef struct node_t {
 } node_t;
 
 typedef struct list_t {
-    struct node_t *nodes;
-    struct node_t *end;
+    struct node_t *head;
+    struct node_t *tail;
     pthread_mutex_t list_mutex;
     size_t size;
 } list_t;
@@ -43,19 +44,19 @@ typedef struct list_t {
 list_t *final_list;
 
 list_t *initList() {
-    list_t *list = (list_t *) calloc(1, sizeof(list_t));
+    list_t *list = (list_t *) calloc(1, sizeof(list_t)); // Thread-safety
     if (list == NULL) {
         perror("Error: calloc returned NULL");
         pthread_exit((void *) ERROR_ALLOC);
     }
-    list->end = (node_t *)calloc(1, sizeof(node_t));
-    if (list->end == NULL) {
+    list->tail = (node_t *)calloc(1, sizeof(node_t));
+    if (list->tail == NULL) {
         perror("Error: calloc returned NULL");
         pthread_exit((void *) ERROR_ALLOC);
     }
     list->size = 0;
     pthread_mutex_init(&list->list_mutex, NULL);
-    list->nodes = NULL;
+    list->head = NULL;
     return list;
 }
 
@@ -72,7 +73,7 @@ node_t *createNode(char *s, size_t s_len, pthread_mutex_t *mutex) {
         pthread_mutex_unlock(mutex);
         pthread_exit((void *)ERROR_ALLOC);
     }
-    memcpy(new_node->string, s, s_len);
+    memcpy(new_node->string, s, s_len); // thread_safety
     new_node->next = NULL;
     new_node->s_len = s_len;
     return new_node;
@@ -83,15 +84,15 @@ void addNodeToList(list_t *list, node_t *node) {
         return;
     }
     pthread_mutex_lock(&list->list_mutex);
-    if (list->nodes == NULL) {
-        list->nodes = node;
-        list->nodes->next = NULL;
-        list->end = list->nodes;
+    if (list->head == NULL) {
+        list->head = node;
+        list->head->next = NULL;
+        list->tail = list->head;
     }
     else {
-        list->end->next = node;
-        list->end->next->next = NULL;
-        list->end = list->end->next;
+        list->tail->next = node;
+        list->tail->next->next = NULL;
+        list->tail = list->tail->next;
     }
     list->size += 1;
     pthread_mutex_unlock(&list->list_mutex);
@@ -102,14 +103,14 @@ void addStringToList(list_t *list, char *s, size_t s_len) {
         return;
     }
     pthread_mutex_lock(&list->list_mutex);
-    node_t **list_nodes = &list->nodes;
+    node_t **list_nodes = &list->head;
     if (*list_nodes == NULL) {
         *list_nodes = createNode(s, s_len, &list->list_mutex);
-        list->end = *list_nodes;
+        list->tail = *list_nodes;
     }
     else {
-        list->end->next = createNode(s, s_len, &list->list_mutex);
-        list->end = list->end->next;
+        list->tail->next = createNode(s, s_len, &list->list_mutex);
+        list->tail = list->tail->next;
     }
     list->size += 1;
     pthread_mutex_unlock(&list->list_mutex);
@@ -120,18 +121,18 @@ void destroyList(list_t *list) {
         return;
     }
     pthread_mutex_destroy(&list->list_mutex);
-    while (list->nodes != NULL) {
-        node_t *tmp = list->nodes->next;
-        free(list->nodes->string);
-        free(list->nodes);
-        list->nodes = tmp;
+    while (list->head != NULL) {
+        node_t *tmp = list->head->next;
+        free(list->head->string);
+        free(list->head);
+        list->head = tmp;
     }
     free(list);
 }
 
 void printList(list_t *list) {
     pthread_mutex_lock(&list->list_mutex);
-    node_t *list_nodes = list->nodes;
+    node_t *list_nodes = list->head;
     while (list_nodes != NULL) {
         pthread_mutex_unlock(&list->list_mutex);
         write(1, list_nodes->string, list_nodes->s_len);
@@ -141,13 +142,52 @@ void printList(list_t *list) {
     pthread_mutex_unlock(&list->list_mutex);
 }
 
-void *mythread(void *arg) {
-    node_t *node = (node_t *)arg;
+int pipeWait() {
     char buf;
     ssize_t was_read = read(start_fd, &buf, 1);
     if (was_read < 0) {
         perror("Error read for synchronization");
     }
+    return (int)was_read;
+}
+
+int syncPipeInit() {
+    int pipe_fds[2];
+    int pipe_res = pipe(pipe_fds);
+    if (pipe_res != 0) {
+        perror("Error pipe():");
+    }
+    start_fd = pipe_fds[0];
+    write_fd = pipe_fds[1];
+    return pipe_res;
+}
+
+int pipeNotify(int num_really_created_threads) {
+    char start_buf[BUFSIZ];
+    ssize_t bytes_written = 0;
+    while (bytes_written < num_really_created_threads) {
+        ssize_t written = 0;
+        if (num_really_created_threads - bytes_written <= BUFSIZ) {
+            written = write(write_fd, start_buf, num_really_created_threads - bytes_written);
+        }
+        else {
+            written = write(write_fd, start_buf, BUFSIZ);
+        }
+        if (written < 0) {
+            perror("Error write");
+            fprintf(stderr, "bytes_written: %ld / %d\n", bytes_written, num_really_created_threads);
+        }
+        else {
+            bytes_written += written;
+        }
+    }
+}
+
+void *mythread(void *arg) {
+    node_t *node = (node_t *)arg;
+
+    pipeWait();
+
     usleep(node->s_len * 30000);
     addNodeToList(final_list, node);
     pthread_exit(NULL);
@@ -188,22 +228,15 @@ int main() {
     }
     free(string);
 
-    int pipe_fds[2];
-    int pipe_res = pipe(pipe_fds);
-    if (pipe_res != 0) {
-        perror("Error pipe():");
-    }
-    start_fd = pipe_fds[0];
-    int write_fd = pipe_fds[1];
-
+    syncPipeInit();
     size_t num_threads_to_create = list->size;
     pthread_t tids[num_threads_to_create];
     bool was_created[num_threads_to_create];
 
     final_list = initList();
-    node_t *tmp_nodes = list->nodes; //nodes will be used by threads to create final_list
-    list->nodes = NULL; // list will consist of the nodes prepared for threads which wouldn't be created
-    list->end = NULL;
+    node_t *tmp_nodes = list->head; //head will be used by threads to create final_list
+    list->head = NULL; // list will consist of the head prepared for threads which wouldn't be created
+    list->tail = NULL;
     list->size = 0;
 
     size_t i = 0;
@@ -225,24 +258,7 @@ int main() {
     fprintf(stderr, "THREADS CREATED\n");
     printf("\n==========LINES==========\n\n");
 
-    char start_buf[BUFSIZ];
-    ssize_t bytes_written = 0;
-    while (bytes_written < really_created) {
-        ssize_t written = 0;
-        if (really_created - bytes_written <= BUFSIZ) {
-            written = write(write_fd, start_buf, really_created - bytes_written);
-        }
-        else {
-            written = write(write_fd, start_buf, BUFSIZ);
-        }
-        if (written < 0) {
-            perror("Error write");
-            fprintf(stderr, "bytes_written: %ld / %d\n", bytes_written, really_created);
-        }
-        else {
-            bytes_written += written;
-        }
-    }
+    pipeNotify(really_created);
     destroyList(list);
 
     for (size_t j = 0; j < num_threads_to_create; j++) {
