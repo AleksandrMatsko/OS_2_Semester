@@ -49,11 +49,6 @@ list_t *initList() {
         perror("Error: calloc returned NULL");
         pthread_exit((void *) ERROR_ALLOC);
     }
-    list->tail = (node_t *)calloc(1, sizeof(node_t));
-    if (list->tail == NULL) {
-        perror("Error: calloc returned NULL");
-        pthread_exit((void *) ERROR_ALLOC);
-    }
     list->size = 0;
     pthread_mutex_init(&list->list_mutex, NULL);
     list->head = NULL;
