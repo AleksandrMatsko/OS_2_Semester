@@ -11,9 +11,6 @@
 
 #define BUF_SIZE BUFSIZ
 
-int start_fd;
-int write_fd;
-
 /*
  *
  * how list_t looks
@@ -42,6 +39,8 @@ typedef struct list_t {
 } list_t;
 
 list_t *final_list;
+int start_fd;
+int write_fd;
 
 list_t *initList() {
     list_t *list = (list_t *) calloc(1, sizeof(list_t)); // Thread-safety
@@ -157,6 +156,11 @@ int syncPipeInit() {
     return pipe_res;
 }
 
+void syncPipeClose() {
+    close(start_fd);
+    close(write_fd);
+}
+
 int pipeNotify(int num_really_created_threads) {
     char start_buf[BUFSIZ];
     ssize_t bytes_written = 0;
@@ -229,8 +233,8 @@ int main() {
     bool was_created[num_threads_to_create];
 
     final_list = initList();
-    node_t *tmp_nodes = list->head; //head will be used by threads to create final_list
-    list->head = NULL; // list will consist of the head prepared for threads which wouldn't be created
+    node_t *tmp_nodes = list->head; // tmp_nodes will be used by threads to create final_list
+    list->head = NULL; // list will consist of the nodes prepared for threads which wouldn't be created
     list->tail = NULL;
     list->size = 0;
 
@@ -250,7 +254,7 @@ int main() {
         i += 1;
         tmp_nodes = tmp_nodes->next;
     }
-    fprintf(stderr, "THREADS CREATED\n");
+    //fprintf(stderr, "THREADS CREATED\n");
     printf("\n==========LINES==========\n\n");
 
     pipeNotify(really_created);
@@ -267,8 +271,7 @@ int main() {
 
     printList(final_list);
 
-    close(start_fd);
-    close(write_fd);
+    syncPipeClose();
     destroyList(final_list);
     return 0;
 }
