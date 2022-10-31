@@ -34,7 +34,7 @@ typedef struct node_t {
 typedef struct list_t {
     struct node_t *head;
     struct node_t *tail;
-    pthread_mutex_t list_mutex;
+    pthread_mutex_t tail_mutex;
     size_t size;
 } list_t;
 
@@ -49,8 +49,9 @@ list_t *initList() {
         pthread_exit((void *) ERROR_ALLOC);
     }
     list->size = 0;
-    pthread_mutex_init(&list->list_mutex, NULL);
+    pthread_mutex_init(&list->tail_mutex, NULL);
     list->head = NULL;
+    list->tail = NULL;
     return list;
 }
 
@@ -77,8 +78,8 @@ void addNodeToList(list_t *list, node_t *node) {
     if (list == NULL || node == NULL) {
         return;
     }
-    pthread_mutex_lock(&list->list_mutex);
-    if (list->head == NULL) {
+    pthread_mutex_lock(&list->tail_mutex);
+    if (list->tail == NULL) {
         list->head = node;
         list->head->next = NULL;
         list->tail = list->head;
@@ -89,32 +90,31 @@ void addNodeToList(list_t *list, node_t *node) {
         list->tail = list->tail->next;
     }
     list->size += 1;
-    pthread_mutex_unlock(&list->list_mutex);
+    pthread_mutex_unlock(&list->tail_mutex);
 }
 
 void addStringToList(list_t *list, char *s, size_t s_len) {
     if (list == NULL) {
         return;
     }
-    pthread_mutex_lock(&list->list_mutex);
-    node_t **list_nodes = &list->head;
-    if (*list_nodes == NULL) {
-        *list_nodes = createNode(s, s_len, &list->list_mutex);
-        list->tail = *list_nodes;
+    pthread_mutex_lock(&list->tail_mutex);
+    if (list->tail == NULL) {
+        list->head = createNode(s, s_len, &list->tail_mutex);
+        list->tail = list->head;
     }
     else {
-        list->tail->next = createNode(s, s_len, &list->list_mutex);
+        list->tail->next = createNode(s, s_len, &list->tail_mutex);
         list->tail = list->tail->next;
     }
     list->size += 1;
-    pthread_mutex_unlock(&list->list_mutex);
+    pthread_mutex_unlock(&list->tail_mutex);
 }
 
 void destroyList(list_t *list) {
     if (list == NULL) {
         return;
     }
-    pthread_mutex_destroy(&list->list_mutex);
+    pthread_mutex_destroy(&list->tail_mutex);
     while (list->head != NULL) {
         node_t *tmp = list->head->next;
         free(list->head->string);
@@ -125,15 +125,17 @@ void destroyList(list_t *list) {
 }
 
 void printList(list_t *list) {
-    pthread_mutex_lock(&list->list_mutex);
+    pthread_mutex_lock(&list->tail_mutex);
     node_t *list_nodes = list->head;
     while (list_nodes != NULL) {
-        pthread_mutex_unlock(&list->list_mutex);
+        pthread_mutex_unlock(&list->tail_mutex);
+
         write(1, list_nodes->string, list_nodes->s_len);
-        pthread_mutex_lock(&list->list_mutex);
+
+        pthread_mutex_lock(&list->tail_mutex);
         list_nodes = list_nodes->next;
     }
-    pthread_mutex_unlock(&list->list_mutex);
+    pthread_mutex_unlock(&list->tail_mutex);
 }
 
 int pipeWait() {
