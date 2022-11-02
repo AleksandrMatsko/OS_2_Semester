@@ -124,18 +124,55 @@ void destroyList(list_t *list) {
     free(list);
 }
 
-void printList(list_t *list) {
+void safePrintList(list_t *list) {
     pthread_mutex_lock(&list->tail_mutex);
     node_t *list_nodes = list->head;
     while (list_nodes != NULL) {
+        ssize_t was_printed = 0;
+        while (was_printed < list_nodes->s_len) {
+            ssize_t written = 0;
+            if (list_nodes->s_len - was_printed < BUFSIZ) {
+                written = write(1, &list_nodes->string[was_printed], list_nodes->s_len - was_printed);
+            }
+            else {
+                written = write(1, &list_nodes->string[was_printed],BUFSIZ);
+            }
+            if (written < 0) {
+                perror("Error write in safePrintList");
+            }
+            else {
+                was_printed += written;
+            }
+        }
         pthread_mutex_unlock(&list->tail_mutex);
-
-        write(1, list_nodes->string, list_nodes->s_len);
 
         pthread_mutex_lock(&list->tail_mutex);
         list_nodes = list_nodes->next;
     }
     pthread_mutex_unlock(&list->tail_mutex);
+}
+
+void unsafePrintList(list_t *list) {
+    node_t *list_nodes = list->head;
+    while (list_nodes != NULL) {
+        ssize_t was_printed = 0;
+        while (was_printed < list_nodes->s_len) {
+            ssize_t written = 0;
+            if (list_nodes->s_len - was_printed < BUFSIZ) {
+                written = write(1, &list_nodes->string[was_printed], list_nodes->s_len - was_printed);
+            }
+            else {
+                written = write(1, &list_nodes->string[was_printed],BUFSIZ);
+            }
+            if (written < 0) {
+                perror("Error write in safePrintList");
+            }
+            else {
+                was_printed += written;
+            }
+        }
+        list_nodes = list_nodes->next;
+    }
 }
 
 int pipeWait() {
@@ -271,7 +308,7 @@ int main() {
         }
     }
 
-    printList(final_list);
+    unsafePrintList(final_list);
 
     syncPipeClose();
     destroyList(final_list);

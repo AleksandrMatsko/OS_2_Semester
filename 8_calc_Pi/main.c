@@ -4,6 +4,7 @@
 #include <string.h>
 #include <stdbool.h>
 #include <unistd.h>
+#include <math.h>
 
 #define NUM_STEPS 2000000000
 
@@ -130,8 +131,8 @@ int main(int argc, char** argv) {
     close(start_fd);
     close(write_fd);
     printf("Time taken to create one thread: %lf sec.\n",
-           (end.tv_sec-start.tv_sec + 0.000000001*(end.tv_nsec-start.tv_nsec)) / (really_created));
-    printf("canonic pi = \t3.14159265358979\n");
+           (end.tv_sec-start.tv_sec + 0.000000001*(end.tv_nsec-start.tv_nsec)) / (really_created - 1));
+    printf("canonic pi = \t%.15g\n", M_PI);
     double max_time_wait = -1;
     for (int i = 0; i < NUM_THREADS; i++) {
         if (max_time_wait < threads_parameters[i].time_waiting) {
