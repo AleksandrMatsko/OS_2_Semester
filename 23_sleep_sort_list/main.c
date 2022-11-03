@@ -10,7 +10,7 @@
  * To use the library
  *
  * You need to run such command
- * $ export LD_LIBRARY_PATH="LD_LIBRARY_PATH=[path]"
+ * $ export LD_LIBRARY_PATH="LD_LIBRARY_PATH:[path]"
  *
  * or add such line to /.bashrc
  * export LD_LIBRARY_PATH="[path]"
