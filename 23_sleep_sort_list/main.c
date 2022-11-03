@@ -5,6 +5,19 @@
 #include <stdlib.h>
 #include <string.h>
 #include <stdbool.h>
+#include "../utilities/sync_pipe/sync_pipe.h" // my own library
+/*
+ * To use the library
+ *
+ * You need to run such command
+ * $ export LD_LIBRARY_PATH="LD_LIBRARY_PATH=[path]"
+ *
+ * or add such line to /.bashrc
+ * export LD_LIBRARY_PATH="[path]"
+ *
+ * where [path] is path to folder: utilities
+ *
+ */
 
 #define ERROR_ALLOC 1
 #define ERROR_READ 2
@@ -39,8 +52,6 @@ typedef struct list_t {
 } list_t;
 
 list_t *final_list;
-int start_fd;
-int write_fd;
 
 list_t *initList() {
     list_t *list = (list_t *) calloc(1, sizeof(list_t)); // Thread-safety
@@ -175,56 +186,10 @@ void unsafePrintList(list_t *list) {
     }
 }
 
-int pipeWait() {
-    char buf;
-    ssize_t was_read = read(start_fd, &buf, 1);
-    if (was_read < 0) {
-        perror("Error read for synchronization");
-    }
-    return (int)was_read;
-}
-
-int syncPipeInit() {
-    int pipe_fds[2];
-    int pipe_res = pipe(pipe_fds);
-    if (pipe_res != 0) {
-        perror("Error pipe():");
-    }
-    start_fd = pipe_fds[0];
-    write_fd = pipe_fds[1];
-    return pipe_res;
-}
-
-void syncPipeClose() {
-    close(start_fd);
-    close(write_fd);
-}
-
-int pipeNotify(int num_really_created_threads) {
-    char start_buf[BUFSIZ];
-    ssize_t bytes_written = 0;
-    while (bytes_written < num_really_created_threads) {
-        ssize_t written = 0;
-        if (num_really_created_threads - bytes_written <= BUFSIZ) {
-            written = write(write_fd, start_buf, num_really_created_threads - bytes_written);
-        }
-        else {
-            written = write(write_fd, start_buf, BUFSIZ);
-        }
-        if (written < 0) {
-            perror("Error write");
-            fprintf(stderr, "bytes_written: %ld / %d\n", bytes_written, num_really_created_threads);
-        }
-        else {
-            bytes_written += written;
-        }
-    }
-}
-
 void *mythread(void *arg) {
     node_t *node = (node_t *)arg;
 
-    pipeWait();
+    sync_pipe_wait();
 
     usleep(node->s_len * 30000);
     addNodeToList(final_list, node);
@@ -266,7 +231,7 @@ int main() {
     }
     free(string);
 
-    syncPipeInit();
+    sync_pipe_init();
     size_t num_threads_to_create = list->size;
     pthread_t tids[num_threads_to_create];
     bool was_created[num_threads_to_create];
@@ -296,7 +261,7 @@ int main() {
     //fprintf(stderr, "THREADS CREATED\n");
     printf("\n==========LINES==========\n\n");
 
-    pipeNotify(really_created);
+    sync_pipe_notify(really_created);
     destroyList(list);
 
     for (size_t j = 0; j < num_threads_to_create; j++) {
@@ -310,7 +275,7 @@ int main() {
 
     unsafePrintList(final_list);
 
-    syncPipeClose();
+    sync_pipe_close();
     destroyList(final_list);
     return 0;
 }
