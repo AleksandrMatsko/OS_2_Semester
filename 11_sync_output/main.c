@@ -15,13 +15,23 @@ pthread_mutex_t mutex[MUTEX_NUM];
 int mutex_owner[MUTEX_NUM];
 
 void acquireMutex(int index, int threadNum) {
-    pthread_mutex_lock(&mutex[index]);
-    mutex_owner[index] = threadNum;
+    int err = pthread_mutex_lock(&mutex[index]);
+    if (err != 0) {
+        fprintf(stderr, "Error mutex lock %s\n", strerror(err));
+    }
+    else {
+        mutex_owner[index] = threadNum;
+    }
 }
 
 void releaseMutex(int index) {
+    int prev_owner = mutex_owner[index];
     mutex_owner[index] = -1;
-    pthread_mutex_unlock(&mutex[index]);
+    int err = pthread_mutex_unlock(&mutex[index]);
+    if (err != 0) {
+        fprintf(stderr, "Error mutex unlock %s\n", strerror(err));
+        mutex_owner[index] = prev_owner;
+    }
 }
 
 void childThread(void *arg) {
@@ -73,6 +83,7 @@ int main() {
     else {
         was_created = true;
     }
+    usleep(10);
     for (int i = 1; i < NUM_LINES + 1; i++) {
         acquireMutex(i % MUTEX_NUM, parentThreadNum);
         printf("Parent printing line %d\n", i);
