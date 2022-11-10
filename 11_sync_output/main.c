@@ -1,23 +1,15 @@
 #include <stdio.h>
 #include <pthread.h>
-#include <malloc.h>
 #include <string.h>
 #include <stdlib.h>
+#include <stdbool.h>
 
 #define NUM_LINES 10
+#define MUTEX_NUM 3
 
 #define ERROR_MUTEX_INIT 1
 
-int num_threads = 2;
-pthread_mutex_t *mutex;
-int mutex_num;
-
-void destroyMutex() {
-    for (int i = 0; i < mutex_num; i++) {
-        pthread_mutex_destroy(&mutex[i]);
-    }
-    free(mutex);
-}
+pthread_mutex_t mutex[MUTEX_NUM];
 
 void try_lock(int index) {
     int try_lock_res = 1;
@@ -31,16 +23,15 @@ void childThread(void *arg) {
     int threadNum = *int_arg;
     pthread_mutex_lock(&mutex[threadNum + 1]);
     for (int i = threadNum + 2; i < NUM_LINES + threadNum + 2; i++) {
-        try_lock(i % mutex_num);
-        printf("Child %d: printing line %d\n", threadNum, i - (threadNum + 1));
-        pthread_mutex_unlock(&mutex[(i + mutex_num - 1) % mutex_num]);
+        try_lock(i % MUTEX_NUM);
+        printf("Child printing line %d\n", i - (threadNum + 1));
+        pthread_mutex_unlock(&mutex[(i + MUTEX_NUM - 1) % MUTEX_NUM]);
     }
+    pthread_exit((void *)EXIT_SUCCESS);
 }
 
 int main() {
-    mutex_num = num_threads + 1;
-    mutex = (pthread_mutex_t *)calloc(mutex_num, sizeof(pthread_mutex_t));
-    for (int i = 0; i < mutex_num; i++) {
+    for (int i = 0; i < MUTEX_NUM; i++) {
         int err = pthread_mutex_init(&mutex[i], NULL);
         if (err != 0) {
             fprintf(stderr, "Error mutex init %s\n", strerror(err));
@@ -49,20 +40,32 @@ int main() {
     }
     pthread_mutex_lock(&mutex[0]);
     pthread_mutex_lock(&mutex[1]);
-    pthread_t tids[num_threads - 1];
-    for (int i = 0; i < num_threads - 1; i++) {
-        int threadNum = i + 1;
-        int err = pthread_create(&tids[i], NULL, (void *)childThread, &threadNum);
+    pthread_t tid;
+    bool was_created;
+    int threadNum = 1;
+    int err = pthread_create(&tid, NULL, (void *)childThread, &threadNum);
+    if (err != 0) {
+        fprintf(stderr, "Error pthread create %s\n", strerror(err));
+        was_created = false;
+    }
+    else {
+        was_created = true;
+    }
+    for (int i = 2; i < NUM_LINES + 2; i++) {
+        printf("Parent printing line %d\n", i - 1);
+        pthread_mutex_unlock(&mutex[(i + MUTEX_NUM - 2) % MUTEX_NUM]);
+        try_lock(i % MUTEX_NUM);
+    }
+
+    if (was_created) {
+        err = pthread_join(tid, NULL);
         if (err != 0) {
-            fprintf(stderr, "Error pthread create %s\n", strerror(err));
+            fprintf(stderr, "Error pthread join %s\n", strerror(err));
         }
     }
 
-    for (int i = 2; i < NUM_LINES + 2; i++) {
-        printf("Parent printing line %d\n", i - 1);
-        pthread_mutex_unlock(&mutex[(i + mutex_num - 2) % mutex_num]);
-        try_lock(i % mutex_num);
+    for (int i = 0; i < MUTEX_NUM; i++) {
+        pthread_mutex_destroy(&mutex[i]);
     }
-    destroyMutex();
-    return 0;
+    pthread_exit((void *)EXIT_SUCCESS);
 }
