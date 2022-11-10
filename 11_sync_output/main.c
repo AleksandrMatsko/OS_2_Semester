@@ -8,16 +8,14 @@
 #define NUM_LINES 10
 #define MUTEX_NUM 3
 
-#define ERROR_MUTEX_INIT 1
+#define ERROR_MUTEXATTR_INIT 1
+#define ERROR_MUTEX_INIT 2
 
 pthread_mutex_t mutex[MUTEX_NUM];
 int mutex_owner[MUTEX_NUM];
 
 void acquireMutex(int index, int threadNum) {
-    int try_lock_res = 1;
-    while (try_lock_res != 0) {
-        try_lock_res = pthread_mutex_trylock(&mutex[index]);
-    }
+    pthread_mutex_lock(&mutex[index]);
     mutex_owner[index] = threadNum;
 }
 
@@ -45,13 +43,17 @@ void childThread(void *arg) {
 
 int main() {
     pthread_mutexattr_t mutexattr;
-    pthread_mutexattr_init(&mutexattr);
+    int err = pthread_mutexattr_init(&mutexattr);
+    if (err != 0) {
+        fprintf(stderr, "Error mutex attr init %s\n", strerror(err));
+        exit(ERROR_MUTEXATTR_INIT);
+    }
     pthread_mutexattr_settype(&mutexattr, PTHREAD_MUTEX_ERRORCHECK);
 
     int parentThreadNum = 0;
     for (int i = 0; i < MUTEX_NUM; i++) {
         mutex_owner[i] = -1;
-        int err = pthread_mutex_init(&mutex[i], &mutexattr);
+        err = pthread_mutex_init(&mutex[i], &mutexattr);
         if (err != 0) {
             fprintf(stderr, "Error mutex init %s\n", strerror(err));
             exit(ERROR_MUTEX_INIT);
@@ -60,11 +62,10 @@ int main() {
 
     pthread_mutexattr_destroy(&mutexattr);
     acquireMutex(0, parentThreadNum);
-    //acquireMutex(, parentThreadNum);
     pthread_t tid;
     bool was_created;
     int childThreadNum = 1;
-    int err = pthread_create(&tid, NULL, (void *)childThread, &childThreadNum);
+    err = pthread_create(&tid, NULL, (void *)childThread, &childThreadNum);
     if (err != 0) {
         fprintf(stderr, "Error pthread create %s\n", strerror(err));
         was_created = false;
