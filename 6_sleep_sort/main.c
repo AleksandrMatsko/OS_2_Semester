@@ -8,10 +8,12 @@
 
 #define ERROR_ALLOC 1
 #define ERROR_READ 2
+#define ERROR_INVALID_ARGUMENTS 3
 
 #define BUF_SIZE BUFSIZ
 
 int start_fd;
+int coef = 30000;
 
 typedef struct list_t {
     char *string;
@@ -26,7 +28,7 @@ void *mythread(void *arg) {
     if (was_read < 0) {
         perror("Error read for synchronization");
     }
-    usleep(node->s_len * 30000);
+    usleep(node->s_len * coef);
     fputs(node->string, stdout);
     pthread_exit(NULL);
 }
@@ -77,7 +79,12 @@ void printList(list_t *list) {
     }
 }
 
-int main() {
+int main(int argc, char *argv[]) {
+    if (argc != 2) {
+        fprintf(stderr, "Error: wrong amount of arguments\n");
+        exit(ERROR_INVALID_ARGUMENTS);
+    }
+    coef = atoi(argv[1]);
     size_t max_buf_size = BUF_SIZE;
     char buf[BUF_SIZE];
     char *string = (char *) calloc(max_buf_size, sizeof(char));
@@ -112,7 +119,7 @@ int main() {
             memset(string, 0, max_buf_size * sizeof(char));
         }
     }
-    printf("\n==========LINES==========\n\n");
+    //printf("\n==========LINES==========\n\n");
     pthread_t tids[list_size];
     bool was_created[list_size];
     list_t *tmp = list;
@@ -141,7 +148,7 @@ int main() {
         tmp = tmp->next;
     }
 
-    fprintf(stderr, "THREADS CREATED\n");
+    //fprintf(stderr, "THREADS CREATED\n");
     char start_buf[BUFSIZ];
     ssize_t bytes_written = 0;
     while (bytes_written < really_created) {
