@@ -11,7 +11,7 @@
 
 pthread_mutex_t mutex[MUTEX_NUM];
 
-void try_lock(int index) {
+void acquireMutex(int index) {
     int try_lock_res = 1;
     while (try_lock_res != 0) {
         try_lock_res = pthread_mutex_trylock(&mutex[index]);
@@ -23,7 +23,7 @@ void childThread(void *arg) {
     int threadNum = *int_arg;
     pthread_mutex_lock(&mutex[threadNum + 1]);
     for (int i = threadNum + 2; i < NUM_LINES + threadNum + 2; i++) {
-        try_lock(i % MUTEX_NUM);
+        acquireMutex(i % MUTEX_NUM);
         printf("Child printing line %d\n", i - (threadNum + 1));
         pthread_mutex_unlock(&mutex[(i + MUTEX_NUM - 1) % MUTEX_NUM]);
     }
@@ -54,7 +54,7 @@ int main() {
     for (int i = 2; i < NUM_LINES + 2; i++) {
         printf("Parent printing line %d\n", i - 1);
         pthread_mutex_unlock(&mutex[(i + MUTEX_NUM - 2) % MUTEX_NUM]);
-        try_lock(i % MUTEX_NUM);
+        acquireMutex(i % MUTEX_NUM);
     }
 
     if (was_created) {
