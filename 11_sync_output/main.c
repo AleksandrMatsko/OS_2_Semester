@@ -34,13 +34,15 @@ void releaseMutex(int index) {
     }
 }
 
-void childThread(void *arg) {
-    int *int_arg = (int *)arg;
-    int threadNum = *int_arg;
-    acquireMutex(threadNum + 1, threadNum);
-    for (int i = threadNum + 2; i < NUM_LINES + threadNum + 2; i++) {
+void printFunc(int threadNum, int num_first_locked_mutex) {
+    for (int i = num_first_locked_mutex; i < NUM_LINES + num_first_locked_mutex; i++) {
         acquireMutex(i % MUTEX_NUM, threadNum);
-        printf("Child printing line %d\n", i - (threadNum + 1));
+        if (threadNum == 0) {
+            printf("Parent printing line %d\n", i - num_first_locked_mutex + 1);
+        }
+        else {
+            printf("Child printing line %d\n", i - num_first_locked_mutex + 1);
+        }
         releaseMutex((i + MUTEX_NUM - 1) % MUTEX_NUM);
     }
     for (int i = 0; i < MUTEX_NUM; i++) {
@@ -48,8 +50,16 @@ void childThread(void *arg) {
             releaseMutex(i);
         }
     }
+}
+
+void childThread(void *arg) {
+    int *int_arg = (int *)arg;
+    int threadNum = *int_arg;
+    acquireMutex(threadNum + 1, threadNum);
+    printFunc(threadNum, threadNum + 2);
     pthread_exit((void *)EXIT_SUCCESS);
 }
+
 
 int main() {
     pthread_mutexattr_t mutexattr;
@@ -84,16 +94,7 @@ int main() {
         was_created = true;
     }
     usleep(10);
-    for (int i = 1; i < NUM_LINES + 1; i++) {
-        acquireMutex(i % MUTEX_NUM, parentThreadNum);
-        printf("Parent printing line %d\n", i);
-        releaseMutex((i + MUTEX_NUM - 1) % MUTEX_NUM);
-    }
-    for (int i = 0; i < MUTEX_NUM; i++) {
-        if (mutex_owner[i] == parentThreadNum) {
-            releaseMutex(i);
-        }
-    }
+    printFunc(parentThreadNum, 1);
 
     if (was_created) {
         err = pthread_join(tid, NULL);
