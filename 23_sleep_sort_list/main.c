@@ -21,6 +21,7 @@
 
 #define ERROR_ALLOC 1
 #define ERROR_READ 2
+#define ERROR_INVALID_ARGUMENTS 3
 
 #define BUF_SIZE BUFSIZ
 
@@ -52,6 +53,7 @@ typedef struct list_t {
 } list_t;
 
 list_t *final_list;
+int coef = 30000;
 
 list_t *initList() {
     list_t *list = (list_t *) calloc(1, sizeof(list_t)); // Thread-safety
@@ -191,12 +193,17 @@ void *mythread(void *arg) {
 
     sync_pipe_wait();
 
-    usleep(node->s_len * 30000);
+    usleep(node->s_len * coef);
     addNodeToList(final_list, node);
     pthread_exit(NULL);
 }
 
-int main() {
+int main(int argc, char *argv[]) {
+    if (argc != 2) {
+        fprintf(stderr, "Error: wrong amount of arguments\n");
+        exit(ERROR_INVALID_ARGUMENTS);
+    }
+    coef = atoi(argv[1]);
     size_t max_buf_size = BUF_SIZE;
     char buf[BUF_SIZE];
     char *string = (char *) calloc(max_buf_size, sizeof(char));
@@ -224,7 +231,7 @@ int main() {
         memcpy(&string[index], buf, BUF_SIZE * sizeof(char));
         index += s_len;
         if (strchr(buf, '\n') != NULL) {
-            addStringToList(list, string, strlen(string) + 1);
+            addStringToList(list, string, strlen(string));
             index = 0;
             memset(string, 0, max_buf_size * sizeof(char));
         }
@@ -259,7 +266,7 @@ int main() {
         tmp_nodes = tmp_nodes->next;
     }
     //fprintf(stderr, "THREADS CREATED\n");
-    printf("\n==========LINES==========\n\n");
+    //printf("\n==========LINES==========\n\n");
 
     sync_pipe_notify(really_created);
     destroyList(list);
