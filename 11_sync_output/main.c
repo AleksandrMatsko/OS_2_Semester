@@ -73,7 +73,7 @@ int main(int argc, char *argv[]) {
     if (argc == 2) {
         MUTEX_NUM = atoi(argv[1]) + 1;
         if (MUTEX_NUM <= 1) {
-            MUTEX_NUM = 2;
+            MUTEX_NUM = 3;
         }
     }
     mutex = (pthread_mutex_t *) calloc(MUTEX_NUM, sizeof(pthread_mutex_t));
