@@ -5,6 +5,8 @@
 #include <stdbool.h>
 #include <unistd.h>
 #include <semaphore.h>
+#include <errno.h>
+#include <time.h>
 
 #define NUM_LINES 10
 
@@ -12,17 +14,36 @@
 
 int SEM_NUM = 2;
 sem_t *sems;
+bool is_stop = false;
 
 void printFunc(int threadNum) {
-    for (int i = 0; i < NUM_LINES; i++) {
-        sem_wait(&sems[threadNum]);
-        if (threadNum == 0) {
-            printf("Parent printing line %d\n", i + 1);
+    //srand(time(NULL)); // for testing error handle
+    for (int i = 0; i < NUM_LINES && !is_stop; i++) {
+        int err = sem_wait(&sems[threadNum]);
+        /*int chance = rand() % 10;  // for testing error handle
+        if (chance == 0) {
+            err = EINTR;
+        }*/
+        if (err == EINTR || is_stop) {
+            if (is_stop) {
+                break;
+            }
+            is_stop = true;
+            fprintf(stderr, "Thread %d: error in sem_wait\nstopping program...\n", threadNum);
+            for (int j = 0; j < NUM_LINES; j++) {
+                sem_post(&sems[j]);
+            }
+            break;
         }
         else {
-            printf("Child %d printing line %d\n", threadNum, i + 1);
+            if (threadNum == 0) {
+                printf("Parent printing line %d\n", i + 1);
+            }
+            else {
+                printf("Child %d printing line %d\n", threadNum, i + 1);
+            }
+            sem_post(&sems[(threadNum + 1) % SEM_NUM]);
         }
-        sem_post(&sems[(threadNum + 1) % SEM_NUM]);
     }
 }
 
