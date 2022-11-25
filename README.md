@@ -1,5 +1,6 @@
 # OS_2_Semester
 Operating Systems Labs
+Laboratory works were submitted together with https://github.com/mentalMint
 
 # Notes:
 ./utilities is my own library
