@@ -72,7 +72,8 @@ void childFunc() {
             fprintf(stderr, "Error mutex lock %s\n", strerror(err));
         }
 
-        while (is_main_printing) {
+        err = 0;
+        while (is_main_printing && err == 0) {
             err = pthread_cond_wait(&cond, &mutex);
             if (err != 0) {
                 fprintf(stderr, "Error cond wait %s\n", strerror(err));
@@ -101,7 +102,6 @@ int main() {
     int err = pthread_create(&tid, NULL, (void *)childFunc, NULL);
     if (err != 0) {
         fprintf(stderr, "Error pthread create %s\n", strerror(err));
-        pthread_mutex_unlock(&mutex);
         cleanUp();
         exit(ERROR_THREAD_CREATE);
     }
@@ -111,7 +111,8 @@ int main() {
             fprintf(stderr, "Error mutex lock %s\n", strerror(err));
         }
 
-        while (!is_main_printing) {
+        err = 0;
+        while (!is_main_printing && err == 0) {
             err = pthread_cond_wait(&cond, &mutex);
             if (err != 0) {
                 fprintf(stderr, "Error cond wait %s\n", strerror(err));
