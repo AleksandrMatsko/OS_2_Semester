@@ -84,8 +84,11 @@ void childFunc() {
         pthread_mutex_unlock(&mutex);
 
         pthread_cond_signal(&cond);
+        if (err != 0) {
+            break;
+        }
     }
-    pthread_cond_broadcast(&cond);
+    pthread_exit(NULL);
 }
 
 int main() {
@@ -123,6 +126,9 @@ int main() {
         pthread_mutex_unlock(&mutex);
 
         pthread_cond_signal(&cond);
+        if (err != 0) {
+            break;
+        }
     }
 
 
