@@ -129,7 +129,6 @@ int main() {
         pthread_cond_signal(&cond);
         pthread_mutex_unlock(&mutex);
 
-        is_stop = true;
         if (err != 0) {
             is_stop = true;
             break;
