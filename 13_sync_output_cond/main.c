@@ -4,7 +4,6 @@
 #include <stdlib.h>
 #include <stdbool.h>
 #include <unistd.h>
-#include <sched.h>
 
 #define ERROR_MUTEXATTR_INIT 2
 #define ERROR_MUTEX_INIT 3
