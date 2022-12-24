@@ -26,7 +26,7 @@
 
 #define TIMEOUT 1200
 #define START_REQUEST_SIZE BUFSIZ
-#define START_RESPONSE_SIZE BUFSIZ
+#define START_RESPONSE_SIZE (BUFSIZ * 2)
 
 
 size_t POLL_TABLE_SIZE = 32;
@@ -36,10 +36,19 @@ struct pollfd *poll_fds;
 int WRITE_STOP_FD = -1;
 int READ_STOP_FD = -1;
 
+double average_write_size_to_client = 0;
+int num_writes_client = 0;
+double average_write_size_to_server = 0;
+int num_writes_server = 0;
+
 void destroyPollFds() {
     for (int i = 0; i < poll_last_index; i++) {
         if (poll_fds[i].fd > 0) {
-            close(poll_fds[i].fd);
+            int close_res = close(poll_fds[i].fd);
+            if (close_res < 0) {
+                fprintf(stderr, "destroy poll_fds[%d].fd ", i);
+                perror("close");
+            }
             poll_fds[i].fd = -1;
         }
     }
@@ -48,10 +57,17 @@ void destroyPollFds() {
 }
 
 void removeFromPollFds(int fd) {
+    if (fd < 0) {
+        return;
+    }
     int i;
     for (i = 0; i < poll_last_index; i++) {
         if (poll_fds[i].fd == fd) {
-            close(poll_fds[i].fd);
+            int close_res = close(poll_fds[i].fd);
+            if (close_res < 0) {
+                fprintf(stderr, "remove poll_fds[%d].fd ", i);
+                perror("close");
+            }
             poll_fds[i].fd = -1;
             poll_fds[i].events = 0;
             poll_fds[i].revents = 0;
@@ -165,12 +181,18 @@ void destroyServers() {
 
 void cleanUp() {
     fprintf(stderr, "\ncleaning up...\n");
+    fprintf(stderr, "client: avg_write_size = %lf num_writes = %d\n", average_write_size_to_client, num_writes_client);
+    fprintf(stderr, "server: avg_write_size = %lf num_writes = %d\n", average_write_size_to_server, num_writes_server);
+    sleep(1);
     if (READ_STOP_FD != -1) {
-        close(READ_STOP_FD);
+        removeFromPollFds(READ_STOP_FD);
         READ_STOP_FD = -1;
     }
     if (WRITE_STOP_FD != -1) {
-        close(WRITE_STOP_FD);
+        int close_res = close(WRITE_STOP_FD);
+        if (close_res < 0) {
+            perror("cleanUp: close WRITE_STOP_FD");
+        }
         WRITE_STOP_FD = -1;
     }
     if (valid_clients) {
@@ -195,7 +217,7 @@ void initEmptyServer(size_t i) {
 }
 
 void initServers() {
-    servers = (server_t *) calloc(SERVERS_SIZE, sizeof(server_t));
+    servers = (server_t *)calloc(SERVERS_SIZE, sizeof(server_t));
     if (servers == NULL) {
         fprintf(stderr, "failed to alloc memory for servers\n");
         cleanUp();
@@ -209,6 +231,7 @@ void initServers() {
 void reallocServers() {
     size_t prev_size = SERVERS_SIZE;
     SERVERS_SIZE *= 2;
+    fprintf(stderr, "realloc servers, new expected servers %lu\n", SERVERS_SIZE);
     servers = realloc(servers, SERVERS_SIZE * sizeof(server_t));
     for (size_t i = prev_size; i < SERVERS_SIZE; i++) {
         initEmptyServer(i);
@@ -272,6 +295,7 @@ void initClients() {
 void reallocClients() {
     size_t prev_size = CLIENTS_SIZE;
     CLIENTS_SIZE *= 2;
+    fprintf(stderr, "realloc clients, new expected clients size %lu\n", CLIENTS_SIZE);
     clients = realloc(clients, CLIENTS_SIZE * sizeof(client_t));
     for (size_t i = prev_size; i < CLIENTS_SIZE; i++) {
         initEmptyClient(i);
@@ -351,7 +375,7 @@ void reallocCacheTable() {
 int findAtCache(char *url, size_t url_size, bool *exists) {
     int free_cache_index = -1;
     for (int i = 0; i < CACHE_SIZE; i++) {
-        if (cache_table[i].valid && !cache_table[i].private && cache_table[i].URL_LEN == url_size &&
+        if (cache_table[i].valid && /*!cache_table[i].private &&*/ cache_table[i].URL_LEN == url_size &&
             strncmp(url, cache_table[i].url, url_size) == 0) {
             *exists = true;
             return i;
@@ -361,7 +385,7 @@ int findAtCache(char *url, size_t url_size, bool *exists) {
         }
     }
     *exists = false;
-    if (free_cache_index < CACHE_SIZE) {
+    if (free_cache_index < CACHE_SIZE && free_cache_index >= 0) {
         return free_cache_index;
     }
     int prev_size = (int)CACHE_SIZE;
@@ -384,16 +408,17 @@ void initPollFds() {
 
 void reallocPollFds() {
     POLL_TABLE_SIZE *= 2;
-    poll_fds = realloc(poll_fds, POLL_TABLE_SIZE * (sizeof(struct pollfd)));
+    //fprintf(stderr, "realloc poll_fds, new expected poll_fds %lu\n", POLL_TABLE_SIZE);
+    poll_fds = (struct pollfd *)realloc(poll_fds, POLL_TABLE_SIZE * (sizeof(struct pollfd)));
     for (size_t i = poll_last_index; i < POLL_TABLE_SIZE; i++) {
         poll_fds[i].fd = -1;
     }
 }
 
-void addFdToPollFds(int sock_fd, short events) {
+void addFdToPollFds(int fd, short events) {
     for (int i = 0; i < poll_last_index; i++) {
         if (poll_fds[i].fd == -1) {
-            poll_fds[i].fd = sock_fd;
+            poll_fds[i].fd = fd;
             poll_fds[i].events = events;
             return;
         }
@@ -401,7 +426,7 @@ void addFdToPollFds(int sock_fd, short events) {
     if (poll_last_index >= POLL_TABLE_SIZE) {
         reallocPollFds();
     }
-    poll_fds[poll_last_index].fd = sock_fd;
+    poll_fds[poll_last_index].fd = fd;
     poll_fds[poll_last_index].events = events;
     poll_last_index += 1;
 }
@@ -450,7 +475,10 @@ int initListener(int port) {
     int bind_res = bind(listen_fd, (struct sockaddr*)&addr, sizeof(struct sockaddr_in));
     if (bind_res != 0) {
         perror("bind");
-        close(listen_fd);
+        int close_res = close(listen_fd);
+        if (close_res < 0) {
+            perror("close listen_fd");
+        }
         cleanUp();
         exit(ERROR_BIND);
     }
@@ -458,7 +486,10 @@ int initListener(int port) {
     int listen_res = listen(listen_fd, (int)CLIENTS_SIZE);
     if (listen_res == -1) {
         perror("listen");
-        close(listen_fd);
+        int close_res = close(listen_fd);
+        if (close_res < 0) {
+            perror("close listen_fd");
+        }
         cleanUp();
         exit(ERROR_LISTEN);
     }
@@ -474,7 +505,10 @@ void acceptNewClient(int listen_fd) {
     int fcntl_res = fcntl(new_client_fd, F_SETFL, O_NONBLOCK);
     if (fcntl_res < 0) {
         perror("make new client nonblock");
-        close(new_client_fd);
+        int close_res = close(new_client_fd);
+        if (close_res < 0) {
+            perror("close client");
+        }
         return;
     }
     int index = findFreeClient(new_client_fd);
@@ -502,16 +536,18 @@ void removeSubscriber(int client_num, int cache_index) {
 }
 
 void disconnectClient(int client_num) {
-    if (client_num < 0 || client_num > CLIENTS_SIZE) {
+    if (client_num < 0 || client_num >= CLIENTS_SIZE) {
         return;
     }
     fprintf(stderr, "disconnecting client %d...\n", client_num);
     if (clients[client_num].request != NULL) {
-        free(clients[client_num].request);
-        clients[client_num].request = NULL;
+        //free(clients[client_num].request);
+        memset(clients[client_num].request, 0, clients[client_num].request_index * sizeof(char));
+        //clients[client_num].request = NULL;
+        clients[client_num].request_index = 0;
+        //clients[client_num].REQUEST_SIZE = 0;
     }
-    clients[client_num].request_index = 0;
-    clients[client_num].REQUEST_SIZE = 0;
+
     if (clients[client_num].cache_index != -1) {
         removeSubscriber(client_num, clients[client_num].cache_index);
         clients[client_num].cache_index = -1;
@@ -530,6 +566,8 @@ void addSubscriber(int client_num, int cache_index) {
     }
     if (cache_table[cache_index].SUBSCRIBERS_SIZE == 0) {
         cache_table[cache_index].SUBSCRIBERS_SIZE = 4;
+        //fprintf(stderr, "calloc subscribers for cache %d subs_size %lu\n", cache_index,
+        //        cache_table[cache_index].SUBSCRIBERS_SIZE);
         cache_table[cache_index].subscribers = (int *) calloc(cache_table[cache_index].SUBSCRIBERS_SIZE, sizeof(int));
         if (cache_table[cache_index].subscribers == NULL) {
             disconnectClient(client_num);
@@ -547,6 +585,8 @@ void addSubscriber(int client_num, int cache_index) {
     }
     size_t prev_index = cache_table[cache_index].SUBSCRIBERS_SIZE;
     cache_table[cache_index].SUBSCRIBERS_SIZE *= 2;
+    //fprintf(stderr, "realloc subscribers for cache %d expected subs_size %lu\n", cache_index,
+    //        cache_table[cache_index].SUBSCRIBERS_SIZE);
     cache_table[cache_index].subscribers = realloc(cache_table[cache_index].subscribers,
                                                    cache_table[cache_index].SUBSCRIBERS_SIZE * sizeof(int));
     for (size_t i = prev_index; i < cache_table[cache_index].SUBSCRIBERS_SIZE; i++) {
@@ -622,6 +662,9 @@ void freeCacheRecord(int cache_num) {
 }
 
 void shiftRequest(int client_num, int pret) {
+    if (client_num < 0 || client_num >= CLIENTS_SIZE || pret <= 0) {
+        return;
+    }
     for (int i = pret; i < clients[client_num].request_index; i++) {
         clients[client_num].request[i] = clients[client_num].request[i - pret];
     }
@@ -646,6 +689,7 @@ void readFromClient(int client_num) {
     }
     if (clients[client_num].REQUEST_SIZE == 0) {
         clients[client_num].REQUEST_SIZE = START_REQUEST_SIZE;
+        //fprintf(stderr, "calloc for request for client %d\n", client_num);
         clients[client_num].request = (char *)calloc(clients[client_num].REQUEST_SIZE, sizeof(char));
         if (clients[client_num].request == NULL) {
             fprintf(stderr, "calloc returned NULL\n");
@@ -654,8 +698,9 @@ void readFromClient(int client_num) {
     }
     if (clients[client_num].request_index + was_read >= clients[client_num].REQUEST_SIZE) {
         clients[client_num].REQUEST_SIZE *= 2;
+        //fprintf(stderr, "realloc for request for client %d\n", client_num);
         clients[client_num].request = realloc(clients[client_num].request,
-                                                    clients[client_num].REQUEST_SIZE);
+                                                    clients[client_num].REQUEST_SIZE * sizeof(char));
     }
     memcpy(&clients[client_num].request[clients[client_num].request_index], buf, was_read);
     clients[client_num].request_index += was_read;
@@ -674,12 +719,13 @@ void readFromClient(int client_num) {
             return;
         }
         size_t url_len = path_len;
-        char *url = calloc(url_len, sizeof(char));
+        //fprintf(stderr, "calloc for url in client %d expected size %lu\n", client_num, path_len);
+        char *url = (char *)calloc(url_len, sizeof(char));
         if (url == NULL) {
             disconnectClient(client_num);
             return;
         }
-        url = strncat(url, path, path_len);
+        memcpy(url, path, path_len);
 
         bool is_request_in_cache;
         int cache_index = findAtCache(url, url_len, &is_request_in_cache);
@@ -687,15 +733,20 @@ void readFromClient(int client_num) {
             addSubscriber(client_num, cache_index);
             clients[client_num].cache_index = cache_index;
             clients[client_num].write_response_index = 0;
-            changeEventForFd(clients[client_num].fd, POLLIN | POLLOUT);
+            if (cache_table[cache_index].response_index != 0) {
+                changeEventForFd(clients[client_num].fd, POLLIN | POLLOUT);
+            }
             shiftRequest(client_num, pret);
+            free(url);
             return;
         }
         char *host = NULL;
         for (size_t i = 0; i < num_headers; i++) {
             if (strncmp(headers[i].name, "Host", 4) == 0) {
+                //fprintf(stderr, "calloc for host in client %d\n", client_num);
                 host = calloc(headers[i].value_len + 1, sizeof(char));
                 if (host == NULL) {
+                    free(url);
                     disconnectClient(client_num);
                     return;
                 }
@@ -704,14 +755,17 @@ void readFromClient(int client_num) {
             }
         }
         if (host == NULL) {
+            free(url);
             disconnectClient(client_num);
             return;
         }
         cache_table[cache_index].valid = true;
 
+        //fprintf(stderr, "calloc for request in cache %d by client %d\n", cache_index, client_num);
         cache_table[cache_index].request = (char *)calloc(pret, sizeof(char));
         if (cache_table[cache_index].request == NULL) {
             disconnectClient(client_num);
+            free(url);
             free(host);
             cache_table[cache_index].valid = false;
             return;
@@ -725,15 +779,21 @@ void readFromClient(int client_num) {
             disconnectClient(client_num);
             freeCacheRecord(cache_index);
             free(host);
+            free(url);
             return;
         }
         int fcntl_res = fcntl(server_fd, F_SETFL, O_NONBLOCK);
         if (fcntl_res < 0) {
             perror("make new server fd nonblock");
-            close(server_fd);
+            int close_res = close(server_fd);
+            if (close_res < 0) {
+                fprintf(stderr, "client %d ", client_num);
+                perror("close");
+            }
             disconnectClient(client_num);
             freeCacheRecord(cache_index);
             free(host);
+            free(url);
             return;
         }
         int server_num = findFreeServer(server_fd);
@@ -765,11 +825,18 @@ void writeToServer(int server_num) {
                                 request[servers[server_num].write_request_index],
                             cache_table[servers[server_num].cache_index].REQUEST_SIZE -
                             servers[server_num].write_request_index);
+    /*if (written == 0 && cache_table[servers[server_num].cache_index].REQUEST_SIZE -
+        servers[server_num].write_request_index == 0) {
+        fprintf(stderr, "write nothing to server %d\n", server_num);
+    }*/
     if (written < 0) {
         perror("write");
         disconnectServer(server_num);
         return;
     }
+    average_write_size_to_server = (average_write_size_to_server * num_writes_server + (double)written) /
+            (num_writes_server + 1);
+    num_writes_server += 1;
     servers[server_num].write_request_index += (int)written;
     if (servers[server_num].write_request_index == cache_table[servers[server_num].cache_index].REQUEST_SIZE) {
         changeEventForFd(servers[server_num].fd, POLLIN);
@@ -788,9 +855,10 @@ void readFromServer(int server_num) {
     }
     else if (was_read == 0) {
         cache_table[servers[server_num].cache_index].full = true;
+        //fprintf(stderr, "realloc for full response for cache %d by server %d\n", servers[server_num].cache_index, server_num);
         cache_table[servers[server_num].cache_index].response = realloc(
                 cache_table[servers[server_num].cache_index].response,
-                cache_table[servers[server_num].cache_index].response_index);
+                cache_table[servers[server_num].cache_index].response_index * sizeof(char));
         cache_table[servers[server_num].cache_index].RESPONSE_SIZE = cache_table[servers[server_num].cache_index].response_index;
         notifySubscribers(servers[server_num].cache_index, POLLIN | POLLOUT);
         disconnectServer(server_num);
@@ -798,17 +866,20 @@ void readFromServer(int server_num) {
     }
     if (cache_table[servers[server_num].cache_index].RESPONSE_SIZE == 0) {
         cache_table[servers[server_num].cache_index].RESPONSE_SIZE = START_RESPONSE_SIZE;
-        cache_table[servers[server_num].cache_index].response = (char *)calloc(START_RESPONSE_SIZE, sizeof(char));
+        //fprintf(stderr, "calloc for response for cache %d by server %d\n", servers[server_num].cache_index, server_num);
+        cache_table[servers[server_num].cache_index].response = (char *)calloc(
+                cache_table[servers[server_num].cache_index].RESPONSE_SIZE, sizeof(char));
         if (cache_table[servers[server_num].cache_index].response == NULL) {
             disconnectServer(server_num);
         }
     }
     if (was_read + cache_table[servers[server_num].cache_index].response_index >=
         cache_table[servers[server_num].cache_index].RESPONSE_SIZE) {
-        cache_table[servers[server_num].cache_index].RESPONSE_SIZE *= 2;
+        cache_table[servers[server_num].cache_index].RESPONSE_SIZE *= 4;
+        //fprintf(stderr, "realloc for response for cache %d by server %d\n", servers[server_num].cache_index, server_num);
         cache_table[servers[server_num].cache_index].response = realloc(
                 cache_table[servers[server_num].cache_index].response,
-                cache_table[servers[server_num].cache_index].RESPONSE_SIZE);
+                cache_table[servers[server_num].cache_index].RESPONSE_SIZE * sizeof(char));
     }
     memcpy(&cache_table[servers[server_num].cache_index].
         response[cache_table[servers[server_num].cache_index].response_index], buf, was_read);
@@ -846,11 +917,17 @@ void writeToClient(int client_num) {
                                 response[clients[client_num].write_response_index],
                             cache_table[clients[client_num].cache_index].response_index -
                                 clients[client_num].write_response_index);
+    /*if (written == 0) {
+        fprintf(stderr, "write nothing to client %d\n", client_num);
+    }*/
     if (written < 0) {
         perror("write");
         disconnectClient(client_num);
         return;
     }
+    average_write_size_to_client = (average_write_size_to_client * num_writes_client + (double)written) /
+            (num_writes_client + 1);
+    num_writes_client += 1;
     clients[client_num].write_response_index += (int)written;
     if (clients[client_num].write_response_index == cache_table[clients[client_num].cache_index].response_index) {
         changeEventForFd(clients[client_num].fd, POLLIN);
@@ -945,6 +1022,7 @@ int main(int argc, char *argv[]) {
             if (client_num == -1) {
                 server_num = findServerByFd(poll_fds[i].fd);
             }
+            //fprintf(stderr, "poll_fds[%lu].fd = %d, client %d, server %d\n", i, poll_fds[i].fd, client_num, server_num);
             bool handled = false;
             if (poll_fds[i].revents & POLLIN) {
                 if (client_num != -1) {
@@ -964,7 +1042,8 @@ int main(int argc, char *argv[]) {
                 }
                 handled = true;
             }
-            if (client_num == -1 && server_num == -1 && poll_fds[i].fd != listen_fd && poll_fds[i].fd != READ_STOP_FD) {
+            if (poll_fds[i].fd >= 0 && client_num == -1 && server_num == -1 && poll_fds[i].fd != listen_fd &&
+                poll_fds[i].fd != READ_STOP_FD) {
                 removeFromPollFds(poll_fds[i].fd);
             }
             if (handled) {
